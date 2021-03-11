@@ -1,58 +1,114 @@
 provider "aws" {
     region = "us-east-1"
-    access_key = "AKIASK55SLTQW6FG4ZHB"
-    secret_key = "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"
 }
 
-variable "environment" {
-    description = "development"
-}
+variable vpc_cidr_block {}
+variable subnet_cidr_block {}
+variable avail_zone {}
+variable env_prefix {}
+variable my_ip {}
+variable instance_type {}
 
-variable "vpc_cidr_block" {
-    description = "vpc cidr block"
-}
 
-variable "subnet_cidr_block" {
-    description = "subnet cidr block"
-    default = "10.0.30.0/24"
-    type = string
-}
-
-resource "aws_vpc" "development-vpc" {
+resource "aws_vpc" "myapp-vpc" {
     cidr_block = var.vpc_cidr_block
     tags = {
-        Name:var.environment
+        Name:"${var.env_prefix}-vpc"
     }
 }
 
-
-
-resource "aws_subnet" "dev-subnet-1" {
-    vpc_id = aws_vpc.development-vpc.id
+resource "aws_subnet" "myapp-subnet-1" {
+    vpc_id = aws_vpc.myapp-vpc.id
     cidr_block = var.subnet_cidr_block
-    availability_zone = "us-east-1a" 
+    availability_zone = var.avail_zone 
     tags = {
-        Name:"subnet-1-dev"
+        Name:"${var.env_prefix}-subnet-1"
     }
 }
 
-data "aws_vpc" "existing_vpc" {
-    default = true
+/*
+resource "aws_route_table" "myapp-route-table" {
+    vpc_id = aws_vpc.myapp-vpc.id
+    route  {
+        cidr_block = "0.0.0.0/0"
+        gateway_id = aws_internet_gateway.myapp-gw.id
+    }
+    tags = {
+        Name: "${var.env_prefix}-rtb"
+    }
 }
+*/
 
-resource "aws_subnet" "dev-subnet-2" {
-    vpc_id = data.aws_vpc.existing_vpc.id
-    cidr_block = "172.31.96.0/20"
-    availability_zone = "us-east-1a"
+resource "aws_internet_gateway" "myapp-gw" {
+    vpc_id = aws_vpc.myapp-vpc.id
         tags = {
-        Name:"subnet-2-default"
+            Name: "${var.env_prefix}-igw"
+        }    
+}
+
+resource "aws_default_route_table" "main-rtb" {
+    default_route_table_id = aws_vpc.myapp-vpc.default_route_table_id
+     tags = {
+            Name: "main-rtb"
+        }  
+
+}
+
+resource "aws_security_group" "myapp-sg" {
+    name = "myapp-sg"
+    vpc_id = aws_vpc.myapp-vpc.id
+    ingress {
+        from_port = 22
+        to_port = 22
+        protocol = "tcp"
+        cidr_blocks = [var.my_ip]
     }
+
+    ingress {
+        from_port = 8080
+        to_port = 8080
+        protocol = "tcp"
+        cidr_blocks = ["0.0.0.0/0"]
+    }
+
+    egress {
+        from_port = 0
+        to_port = 0
+        protocol = "-1"
+        cidr_blocks = ["0.0.0.0/0"] 
+        prefix_list_ids = []       
+    }
+            tags = {
+            Name: "${var.env_prefix}-sg"
+        }    
 }
 
-output "dev-vpc-id" {
-    value = aws_vpc.development-vpc.id 
+data "aws_ami" "latest-amazon-linux-image" {
+    most_recent = true
+    owners = ["099720109477"]
 }
 
-output "dev-subnet-id" {
-    value = aws_subnet.dev-subnet-1.id
+output "aws_ami_id" {
+    value = data.aws_ami.latest-amazon-linux-image.id
 }
+
+
+resource "aws_instance" "myapp-server" {
+    ami = data.aws_ami.latest-amazon-linux-image.id
+    instance_type = var.instance_type
+    subnet_id = aws_subnet.myapp-subnet-1
+    vpc_security_group_id = [aws_default_security_group.default-sg.id]
+    availability_zone = var.avail_zone
+
+    associate_public_ip_address = true
+    
+}
+
+
+
+/*
+resource "aws_route_table_association" "a-rtb-subnet" {
+    subnet_id = aws_subnet.myapp-subnet-1.id
+    route_table_id = aws_route_table.myapp-route-table.id
+}
+*/
